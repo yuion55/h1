@@ -66,8 +66,13 @@ extern "C" __global__ void powmod_kernel(
 """, "powmod_kernel")
 
         N       = len(bases)
-        d_bases = cp.asarray(bases, dtype=cp.int64)
-        d_exps  = cp.asarray(exps,  dtype=cp.int64)
+        # Use pinned memory for host-device transfers
+        pinned_bases = cp.cuda.alloc_pinned_memory(bases.nbytes)
+        pinned_exps = cp.cuda.alloc_pinned_memory(exps.nbytes)
+        np.frombuffer(pinned_bases, dtype=np.int64, count=N)[:] = bases
+        np.frombuffer(pinned_exps, dtype=np.int64, count=N)[:] = exps
+        d_bases = cp.asarray(np.frombuffer(pinned_bases, dtype=np.int64, count=N))
+        d_exps  = cp.asarray(np.frombuffer(pinned_exps, dtype=np.int64, count=N))
         d_out   = cp.empty(N, dtype=cp.int64)
         threads = 256
         blocks  = (N + threads - 1) // threads
@@ -80,7 +85,7 @@ extern "C" __global__ void powmod_kernel(
         GPU sigma_k sieve for N up to 10^7.
 
         Algorithm: for each d (in parallel), add d^k to all multiples.
-        Implemented as a CuPy scatter-add with strided indexing.
+        Implemented as a CuPy CUDA kernel that parallelizes over d.
 
         Benchmarks (N=10^7, k=1):
             CuPy   : ~200 ms
@@ -89,15 +94,30 @@ extern "C" __global__ void powmod_kernel(
         if not HAS_CUPY or N < 100_000:
             return sigma_k_sieve(N, k)
 
-        result = cp.zeros(N + 1, dtype=cp.int64)
-        d_arr  = cp.arange(1, N + 1, dtype=cp.int64)
-        dk_arr = cp.power(d_arr, k)
-        if mod:
-            dk_arr = dk_arr % mod
+        _sigma_kernel = cp.RawKernel(r"""
+extern "C" __global__ void sigma_k_kernel(
+    long long* result, int N, int k, long long mod
+) {
+    int d = blockDim.x * blockIdx.x + threadIdx.x + 1;
+    if (d > N) return;
+    // Compute d^k
+    long long dk = 1;
+    for (int j = 0; j < k; j++) dk *= d;
+    if (mod > 0) dk = dk % mod;
+    // Scatter-add to all multiples of d (dk is always positive since d >= 1, k >= 0)
+    for (int m = d; m <= N; m += d) {
+        atomicAdd((unsigned long long*)&result[m], (unsigned long long)dk);
+    }
+}
+""", "sigma_k_kernel")
 
-        for d_host in range(1, N + 1):
-            indices = cp.arange(d_host, N + 1, d_host, dtype=cp.int64)
-            cp.add.at(result, indices, dk_arr[d_host - 1])
+        result = cp.zeros(N + 1, dtype=cp.int64)
+        threads = 256
+        blocks = (N + threads - 1) // threads
+        _sigma_kernel(
+            (blocks,), (threads,),
+            (result, np.int32(N), np.int32(k), np.int64(mod if mod else 0))
+        )
 
         arr = cp.asnumpy(result)
         return arr
@@ -133,10 +153,12 @@ extern "C" __global__ void powmod_kernel(
         rng    = cp.random.randint(1, prime_mod, size=n_points, dtype=cp.int64)
         diff   = poly_coeffs_f.astype(np.int64) - poly_coeffs_g.astype(np.int64)
         # Horner evaluation: p(r) = c_0 + r*(c_1 + r*(c_2 + ...))
+        # Vectorized: all points evaluated simultaneously per coefficient step
         d_diff = cp.asarray(diff, dtype=cp.int64)
         val    = cp.zeros(n_points, dtype=cp.int64)
-        for coef in reversed(d_diff):
-            val = (val * rng + int(coef)) % prime_mod
+        # Single vectorized loop over coefficients (each step is a CuPy array op)
+        for i in range(len(d_diff) - 1, -1, -1):
+            val = (val * rng + d_diff[i]) % prime_mod
         return bool(cp.all(val == 0))
 
     @staticmethod

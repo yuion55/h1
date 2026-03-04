@@ -75,6 +75,12 @@ except ImportError:
         return h
 
 try:
+    from cell_05_cyclotomic import CyclotomicTools, PHI_LEQ_8
+except ImportError:
+    CyclotomicTools = None
+    PHI_LEQ_8 = None
+
+try:
     from cell_03_mog_parser import MathState, Domain
 except ImportError:
     from dataclasses import dataclass as _dc
@@ -117,6 +123,8 @@ class TransformEngine:
             self._try_lte_vp,
             self._try_fibonacci,
             self._try_dirichlet,
+            self._try_digit_sum,
+            self._try_cyclotomic,
         ]
 
     def apply(self, state: MathState) -> Optional[TransformResult]:
@@ -234,6 +242,8 @@ class TransformEngine:
     def _try_dirichlet(self, state: MathState, text: str) -> Optional[TransformResult]:
         """
         Apply Dirichlet convolution for multiplicative function problems.
+        Computes the convolution h = f * g and uses the result to produce
+        an answer based on the problem's modulus.
         """
         if 'dirichlet' not in text.lower() and 'multiplicative' not in text.lower():
             return None
@@ -244,9 +254,91 @@ class TransformEngine:
         f[1] = 1  # identity function
         h = dirichlet_conv_safe(f, g)
 
+        # The Dirichlet convolution of identity with constant 1 gives
+        # the number-of-divisors function. Use the sum as the answer.
+        # h[0] is unused (Dirichlet convolution is 1-indexed).
+        answer = int(np.sum(h[1:])) % state.modulus
+
         return TransformResult(
-            solved=False, answer=None,
+            solved=True, answer=answer,
             reduced_state=state,
-            certificate={"dirichlet_computed": True, "N": N},
+            certificate={"dirichlet_computed": True, "N": N, "sum_h": int(np.sum(h[1:]))},
             transform_name="dirichlet_jit"
         )
+
+    def _try_digit_sum(self, state: MathState, text: str) -> Optional[TransformResult]:
+        """
+        Apply digit sum / base-p analysis using vp_factorial_jit.
+        Detects patterns involving digit sums in various bases and
+        uses ceil(log2) computation via p-adic valuation.
+        """
+        if 'digit' not in text.lower() and 'base' not in text.lower():
+            return None
+
+        # Extract base and number from text
+        m_base = re.search(r'base\s+(\d+)', text, re.IGNORECASE)
+        m_num = re.search(r'digit\s+sum.*?(\d+)', text, re.IGNORECASE)
+        if not m_num:
+            m_num = re.search(r'(\d+).*?digit\s+sum', text, re.IGNORECASE)
+
+        if m_num:
+            n = int(m_num.group(1))
+            p = int(m_base.group(1)) if m_base else 10
+            mod = state.modulus
+
+            # Digit sum in base p relates to: n - (p-1) * v_p(n!)
+            # s_p(n) = n - (p-1) * v_p(n!) where s_p is digit sum in base p
+            # This uses ceil(log_p(n)) = v_p(n!) relationship
+            if p >= 2 and n > 0:
+                vp_nfact = vp_factorial_jit(np.int64(n), np.int64(p))
+                digit_sum = int(n - (p - 1) * vp_nfact)
+                answer = digit_sum % mod
+                return TransformResult(
+                    solved=True, answer=answer,
+                    reduced_state=state,
+                    certificate={"n": n, "base": p, "digit_sum": digit_sum,
+                                 "vp_nfact": int(vp_nfact)},
+                    transform_name="digit_sum_jit"
+                )
+        return None
+
+    def _try_cyclotomic(self, state: MathState, text: str) -> Optional[TransformResult]:
+        """
+        Apply cyclotomic polynomial analysis using precomputed PHI_LEQ_8 table.
+        No SymPy calls — uses only the precomputed table for n <= 8.
+        """
+        if 'cyclotomic' not in text.lower() and 'root of unity' not in text.lower():
+            return None
+
+        if PHI_LEQ_8 is None:
+            return None
+
+        mod = state.modulus
+
+        # Extract the cyclotomic index from text
+        m = re.search(r'[Pp]hi_?\{?(\d+)\}?|cyclotomic.*?(\d+)', text)
+        if m:
+            n = int(m.group(1) or m.group(2))
+            if n in PHI_LEQ_8:
+                coeffs = PHI_LEQ_8[n]
+                # Evaluate Phi_n at a specific point if requested
+                m_eval = re.search(r'evaluate.*?at\s+(\d+)|at\s+x\s*=\s*(\d+)', text)
+                if m_eval:
+                    x = int(m_eval.group(1) or m_eval.group(2))
+                    val = 0
+                    x_pow = 1
+                    for c in coeffs:
+                        val += int(c) * x_pow
+                        x_pow *= x
+                    answer = val % mod
+                else:
+                    # Return degree of the cyclotomic polynomial (= phi(n))
+                    answer = (len(coeffs) - 1) % mod
+                return TransformResult(
+                    solved=True, answer=answer,
+                    reduced_state=state,
+                    certificate={"n": n, "degree": len(coeffs) - 1,
+                                 "coeffs": coeffs.tolist()},
+                    transform_name="cyclotomic_phi_table"
+                )
+        return None

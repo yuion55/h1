@@ -134,14 +134,15 @@ class MPCPlanner:
 
     def solve_batched(self, states: list, max_steps: int = 50) -> list:
         """
-        Solve multiple independent problems in parallel via ProcessPoolExecutor.
-        Each problem gets its own process (avoids GIL for CPU-bound transforms).
+        Solve multiple independent problems in parallel via ThreadPoolExecutor.
+        Uses threads instead of processes to avoid pickling issues with
+        non-serializable components (LLM model, thread pools).
 
         Returns list of (answer, trace) tuples.
         """
         def solve_one(state):
             return self.solve(state, max_steps)
 
-        with ProcessPoolExecutor(max_workers=min(len(states), N_CORES)) as pool:
+        with ThreadPoolExecutor(max_workers=min(len(states), N_CORES)) as pool:
             results = list(pool.map(solve_one, states))
         return results
