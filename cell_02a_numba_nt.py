@@ -327,9 +327,7 @@ def poly_mul_ntt(f: np.ndarray, g: np.ndarray, mod: int = None) -> np.ndarray:
     ga = np.zeros(n, dtype=np.int64); ga[:len(g)] = g
     ntt_fa = ntt(fa)
     ntt_ga = ntt(ga)
-    product = np.empty(n, dtype=np.int64)
-    for i in range(n):
-        product[i] = ntt_fa[i] * ntt_ga[i] % NTT_MOD
+    product = ntt_fa * ntt_ga % NTT_MOD
     h  = ntt(product, invert=True)
     h  = h[:len(f) + len(g) - 1]
     if mod:
@@ -451,6 +449,7 @@ def _warmup_jit():
     f = np.zeros(100, dtype=np.int64); f[1] = 1
     g = np.ones(100,  dtype=np.int64); g[0] = 0
     dirichlet_conv_safe(f, g)
+    poly_mul_ntt(np.array([1, 2], dtype=np.int64), np.array([1, 2], dtype=np.int64))
     print(" ✅ done.")
 
 _warmup_jit()

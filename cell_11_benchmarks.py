@@ -105,13 +105,11 @@ assert t_roots < 0.005, f"roots_of_unity_filter_batch too slow: {t_roots*1e3:.3f
 # ── Benchmark 8: KalmanBeliefState.update_batch ───────────────────────────
 try:
     from cell_08_kalman import KalmanBeliefState
-    kb = KalmanBeliefState()
-    for i in range(1000):
-        kb.facts[f"fact_{i}"] = i
-        kb.mean = np.append(kb.mean, 0.5)
-        kb.var = np.append(kb.var, 0.1)
-    obs = {f"fact_{i}": 1.0 for i in range(1000)}
-    t_kalman = benchmark(kb.update_batch, obs, n_runs=100)
+    initial = {f"fact_{i}": 0.5 for i in range(1000)}
+    kb = KalmanBeliefState(initial)
+    names = list(initial.keys())
+    z_vals = np.ones(1000, dtype=np.float64)
+    t_kalman = benchmark(kb.update_batch, names, z_vals, n_runs=100)
     print(f"  KalmanBeliefState.update_batch (N=1000): {t_kalman*1e3:.3f}ms")
     assert t_kalman < 0.001, f"Kalman update too slow: {t_kalman*1e3:.3f}ms (limit 1ms)"
 except ImportError:
@@ -120,13 +118,12 @@ except ImportError:
 # ── Benchmark 9: ParallelZ3Checker ────────────────────────────────────────
 try:
     from cell_09b_z3_parallel import ParallelZ3Checker
-    import z3
 
-    def make_goal(i):
-        x = z3.Int(f'x_{i}')
-        return z3.And(x > 0, x < 100, x * x == (i + 2) * (i + 2))
-
-    goals = [make_goal(i) for i in range(4)]
+    goals = [
+        (f"z3.And(vars_['x_{i}'] > 0, vars_['x_{i}'] < 100, vars_['x_{i}'] * vars_['x_{i}'] == {(i + 2) ** 2})",
+         {f"x_{i}": (0, 100)})
+        for i in range(4)
+    ]
     checker = ParallelZ3Checker(n_workers=4)
     t_z3 = benchmark(checker.check_all, goals, n_runs=5, warmup=1)
     print(f"  ParallelZ3Checker (4 goals): {t_z3:.3f}s")
