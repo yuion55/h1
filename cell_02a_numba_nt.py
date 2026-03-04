@@ -271,8 +271,8 @@ def ntt(a: np.ndarray, invert: bool = False) -> np.ndarray:
     >>> np.allclose(a, b)
     True
     """
-    NTT_M = np.int64(998244353)
-    NTT_R = np.int64(3)
+    NTT_M = np.int64(998244353)   # Local copy for JIT (globals not accessible in @njit)
+    NTT_R = np.int64(3)            # Local copy for JIT
     n = len(a)
     a = a.copy()
     for i in range(n):

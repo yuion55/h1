@@ -104,7 +104,7 @@ extern "C" __global__ void sigma_k_kernel(
     long long dk = 1;
     for (int j = 0; j < k; j++) dk *= d;
     if (mod > 0) dk = dk % mod;
-    // Scatter-add to all multiples of d
+    // Scatter-add to all multiples of d (dk is always positive since d >= 1, k >= 0)
     for (int m = d; m <= N; m += d) {
         atomicAdd((unsigned long long*)&result[m], (unsigned long long)dk);
     }

@@ -99,8 +99,8 @@ assert t_fib < 0.001, f"fib_jit too slow: {t_fib*1e3:.3f}ms (limit 1ms)"
 a_coeffs = np.random.randn(1000)
 residues = np.arange(1000)
 t_roots = benchmark(roots_of_unity_filter_batch, a_coeffs, 1000, residues, n_runs=100)
-print(f"  roots_of_unity_filter (N=10^3): {t_roots*1e3:.3f}ms")
-assert t_roots < 0.005, f"roots_of_unity_filter too slow: {t_roots*1e3:.3f}ms (limit 5ms)"
+print(f"  roots_of_unity_filter_batch (N=10^3): {t_roots*1e3:.3f}ms")
+assert t_roots < 0.005, f"roots_of_unity_filter_batch too slow: {t_roots*1e3:.3f}ms (limit 5ms)"
 
 # ── Benchmark 8: KalmanBeliefState.update_batch ───────────────────────────
 try:

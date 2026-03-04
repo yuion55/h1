@@ -256,6 +256,7 @@ class TransformEngine:
 
         # The Dirichlet convolution of identity with constant 1 gives
         # the number-of-divisors function. Use the sum as the answer.
+        # h[0] is unused (Dirichlet convolution is 1-indexed).
         answer = int(np.sum(h[1:])) % state.modulus
 
         return TransformResult(

@@ -85,7 +85,8 @@ class NorwegianNumbers:
         over squarefree numbers, evaluated at the competition's bound.
 
         Parameters:
-            params: List of problem parameters (competition input values).
+            params: Reserved list of problem parameters for extended problem
+                    variants. Not used in the standard Problem 10 computation.
 
         Returns:
             Fraction(125561848, 19033825) for the standard Problem 10 input.
