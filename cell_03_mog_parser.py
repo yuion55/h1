@@ -112,7 +112,8 @@ class MOGParser:
         }
         scores = {}
         for domain, kws in keyword_sets.items():
-            scores[domain] = sum(1 for kw in kws if kw in text_lower)
+            matches = np.frompyfunc(lambda kw: kw in text_lower, 1, 1)(kws)
+            scores[domain] = int(np.sum(matches.astype(bool)))
         top    = max(scores, key=scores.get)
         second = sorted(scores.values(), reverse=True)[1]
         return top if scores[top] - second > 1 else Domain.MIXED

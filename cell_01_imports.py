@@ -13,7 +13,7 @@ from sympy import factorint, isprime, totient, primerange
 import networkx as nx
 
 # ── Numba ────────────────────────────────────────────────────────────────────
-from numba import njit, prange, vectorize, int64, float64, boolean
+from numba import njit, prange, cuda, vectorize, int64, float64, boolean
 from numba import typed, types
 import numba as nb
 
