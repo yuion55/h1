@@ -242,8 +242,8 @@ class TransformEngine:
     def _try_dirichlet(self, state: MathState, text: str) -> Optional[TransformResult]:
         """
         Apply Dirichlet convolution for multiplicative function problems.
-        Computes the convolution h = f * g and uses the result to produce
-        an answer based on the problem's modulus.
+        Computes the convolution h = f * g and populates state.facts with
+        the result for use by subsequent transforms.
         """
         if 'dirichlet' not in text.lower() and 'multiplicative' not in text.lower():
             return None
@@ -255,12 +255,14 @@ class TransformEngine:
         h = dirichlet_conv_safe(f, g)
 
         # The Dirichlet convolution of identity with constant 1 gives
-        # the number-of-divisors function. Use the sum as the answer.
-        # h[0] is unused (Dirichlet convolution is 1-indexed).
-        answer = int(np.sum(h[1:])) % state.modulus
+        # the number-of-divisors function. Store the computed convolution
+        # in state facts for use by subsequent transforms rather than
+        # returning a generic sum as a solved answer.
+        state.facts['dirichlet_h'] = h
+        state.facts['dirichlet_sum'] = int(np.sum(h[1:]))
 
         return TransformResult(
-            solved=True, answer=answer,
+            solved=False, answer=None,
             reduced_state=state,
             certificate={"dirichlet_computed": True, "N": N, "sum_h": int(np.sum(h[1:]))},
             transform_name="dirichlet_jit"

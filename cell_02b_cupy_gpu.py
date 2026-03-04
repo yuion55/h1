@@ -87,11 +87,25 @@ extern "C" __global__ void powmod_kernel(
         Algorithm: for each d (in parallel), add d^k to all multiples.
         Implemented as a CuPy CUDA kernel that parallelizes over d.
 
+        For k >= 3 and large N, d^k may overflow int64. When mod == 0 and
+        k >= 3, falls back to CPU to avoid silent overflow in CUDA kernel.
+
         Benchmarks (N=10^7, k=1):
             CuPy   : ~200 ms
             NumPy  : ~3000 ms  →  15× speedup
         """
         if not HAS_CUPY or N < 100_000:
+            return sigma_k_sieve(N, k)
+
+        # Guard: for k >= 3 without modular reduction, d^k can overflow int64
+        # when d is large. Fall back to CPU which uses Python arbitrary precision.
+        if k >= 3 and mod == 0:
+            import warnings
+            warnings.warn(
+                f"sigma_k_sieve_gpu: k={k} with no modulus may overflow int64 "
+                f"for large d. Falling back to CPU.",
+                RuntimeWarning, stacklevel=2,
+            )
             return sigma_k_sieve(N, k)
 
         _sigma_kernel = cp.RawKernel(r"""
