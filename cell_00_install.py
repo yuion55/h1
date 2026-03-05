@@ -35,6 +35,10 @@ pip("sympy>=1.12")
 pip("z3-solver")
 pip("networkx>=3.0")
 
+# Sentence transformers / retrieval
+pip("sentence-transformers>=2.7.0")
+pip("lean4-client")
+
 # Lean 4 (from Kaggle dataset cache)
 LEAN_BIN = "/kaggle/input/lean4-mathlib-cache/lean/bin/lean"
 if not os.path.exists(LEAN_BIN):
