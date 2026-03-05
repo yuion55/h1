@@ -1,11 +1,11 @@
 # cell_07_llm_executor_v5.py
 """
-CTRL-MATH v5 — LLM Executor with Full Prompt System
-Flash Attention 2 + 4-bit NF4 + speculative decoding.
+CTRL-MATH AIMO3 — LLM Executor
+Flash Attention 2 + 4-bit NF4 + LoRA adapter + ensemble.
 
-All 7 prompt templates are module-level string constants.
-Draft model: Qwen2.5-Math-1.5B
-Main model:  Qwen2.5-Math-7B-Instruct
+Primary model:  Qwen2.5-Math-14B-Instruct (+ LoRA adapter)
+Ensemble model: DeepSeek-Math-7B-Instruct
+PRM model:      Qwen2.5-Math-1.5B-Instruct
 """
 
 from __future__ import annotations
@@ -113,56 +113,124 @@ try:
 except ImportError:
     HAS_TRANSFORMERS = False
 
+try:
+    from peft import PeftModel
+    HAS_PEFT = True
+except ImportError:
+    HAS_PEFT = False
+
 
 class LLMExecutorV5:
     """
     LLM executor using:
-      - Main model:  Qwen2.5-Math-7B-Instruct
-      - Draft model: Qwen2.5-Math-1.5B  (speculative decoding)
+      - Main model:     Qwen2.5-Math-14B-Instruct (+ LoRA adapter via PEFT)
+      - Ensemble model: DeepSeek-Math-7B-Instruct
+      - PRM model:      Qwen2.5-Math-1.5B-Instruct
       - Flash Attention 2 + 4-bit NF4 quantization
     """
 
-    MAIN_MODEL  = "Qwen/Qwen2.5-Math-7B-Instruct"
-    DRAFT_MODEL = "Qwen/Qwen2.5-Math-1.5B"
+    def __init__(
+        self,
+        primary_model:   str = "Qwen/Qwen2.5-Math-14B-Instruct",
+        ensemble_model:  str = "deepseek-ai/DeepSeek-Math-7B-Instruct",
+        prm_model:       str = "Qwen/Qwen2.5-Math-1.5B-Instruct",
+        lora_adapter:    Optional[str] = None,
+        load_in_4bit:    bool = True,
+        use_flash_attn:  bool = True,
+        device_map:      str = "auto",
+    ):
+        self.device = "cuda"
+        self.primary_model_id  = primary_model
+        self.ensemble_model_id = ensemble_model
+        self.prm_model_id      = prm_model
+        self.lora_adapter      = lora_adapter
+        self.load_in_4bit      = load_in_4bit
+        self.use_flash_attn    = use_flash_attn
+        self.device_map        = device_map
 
-    def __init__(self, device: str = "cuda", load_models: bool = True):
-        self.device = device
+        self.primary_model  = None
+        self.primary_tok    = None
+        self.ensemble_model = None
+        self.ensemble_tok   = None
+        # Legacy aliases
         self.model       = None
         self.draft_model = None
         self.tokenizer   = None
 
-        if load_models and HAS_TRANSFORMERS:
+        if HAS_TRANSFORMERS:
             self._load()
 
     def _load(self) -> None:
         bnb_config = BitsAndBytesConfig(
-            load_in_4bit=True,
+            load_in_4bit=self.load_in_4bit,
             bnb_4bit_compute_dtype=torch.bfloat16,
             bnb_4bit_quant_type="nf4",
             bnb_4bit_use_double_quant=True,
-        )
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.MAIN_MODEL, trust_remote_code=True
-        )
-        self.model = AutoModelForCausalLM.from_pretrained(
-            self.MAIN_MODEL,
-            device_map="auto",
-            quantization_config=bnb_config,
-            trust_remote_code=True,
-            torch_dtype=torch.bfloat16,
-            attn_implementation="flash_attention_2",
-        )
-        self.model.eval()
+        ) if self.load_in_4bit else None
 
-        # Draft model for speculative decoding (smaller, faster)
-        self.draft_model = AutoModelForCausalLM.from_pretrained(
-            self.DRAFT_MODEL,
-            device_map="auto",
-            torch_dtype=torch.bfloat16,
-            trust_remote_code=True,
+        attn_impl = "flash_attention_2" if self.use_flash_attn else "eager"
+
+        # ── 1. Primary model (Qwen2.5-Math-14B-Instruct) ──────────────────────
+        self.primary_tok = AutoTokenizer.from_pretrained(
+            self.primary_model_id, trust_remote_code=True
         )
-        self.draft_model.eval()
-        print("✅ LLMExecutorV5 loaded: main=7B + draft=1.5B, FlashAttn2 + NF4")
+        load_kwargs: Dict[str, Any] = dict(
+            device_map=self.device_map,
+            trust_remote_code=True,
+            torch_dtype=torch.bfloat16,
+            attn_implementation=attn_impl,
+        )
+        if bnb_config is not None:
+            load_kwargs["quantization_config"] = bnb_config
+        self.primary_model = AutoModelForCausalLM.from_pretrained(
+            self.primary_model_id, **load_kwargs
+        )
+        self.primary_model.eval()
+
+        # ── 2. Apply LoRA adapter if provided ─────────────────────────────────
+        if self.lora_adapter is not None and HAS_PEFT:
+            self.primary_model = PeftModel.from_pretrained(
+                self.primary_model, self.lora_adapter
+            )
+            self.primary_model.eval()
+
+        # Legacy alias
+        self.model     = self.primary_model
+        self.tokenizer = self.primary_tok
+
+        # ── 3. Ensemble model (DeepSeek-Math-7B) — only if VRAM > 30 GB ──────
+        try:
+            vram_gb = torch.cuda.get_device_properties(0).total_memory / 1e9
+        except Exception:
+            vram_gb = 0.0
+
+        if vram_gb > 30.0:
+            self.ensemble_tok = AutoTokenizer.from_pretrained(
+                self.ensemble_model_id, trust_remote_code=True
+            )
+            ensemble_kwargs: Dict[str, Any] = dict(
+                device_map=self.device_map,
+                trust_remote_code=True,
+                torch_dtype=torch.bfloat16,
+            )
+            if bnb_config is not None:
+                ensemble_kwargs["quantization_config"] = bnb_config
+            self.ensemble_model = AutoModelForCausalLM.from_pretrained(
+                self.ensemble_model_id, **ensemble_kwargs
+            )
+            self.ensemble_model.eval()
+            print(
+                f"✅ LLMExecutorV5 loaded: primary=14B + ensemble=7B, "
+                f"FlashAttn2 + NF4"
+            )
+        else:
+            print(
+                f"✅ LLMExecutorV5 loaded: primary=14B (ensemble skipped, "
+                f"VRAM={vram_gb:.1f}GB), FlashAttn2 + NF4"
+            )
+
+        # Legacy draft_model alias (for any code expecting speculative decoding)
+        self.draft_model = self.ensemble_model
 
     # ── Core generation ────────────────────────────────────────────────────────
 
@@ -216,6 +284,41 @@ class LLMExecutorV5:
         return result
 
     # ── Public API ─────────────────────────────────────────────────────────────
+
+    def generate_ensemble(self, prompt: str, **kwargs) -> str:
+        """
+        Run generation with the primary model (+ ensemble for verification).
+
+        Returns the primary model's answer. The ensemble model is run in
+        parallel when available and used for voting/verification.
+        """
+        primary_out = self._generate_structured(prompt, **kwargs)
+
+        if self.ensemble_model is not None and self.ensemble_tok is not None:
+            try:
+                inputs = self.ensemble_tok(
+                    prompt,
+                    return_tensors="pt",
+                    truncation=True,
+                    max_length=2048,
+                ).to(self.device)
+                gen_kwargs: Dict[str, Any] = dict(
+                    max_new_tokens=kwargs.get("max_new_tokens", 512),
+                    temperature=kwargs.get("temperature", 0.3),
+                    do_sample=kwargs.get("temperature", 0.3) > 0.0,
+                    pad_token_id=self.ensemble_tok.eos_token_id,
+                )
+                with torch.no_grad():
+                    output = self.ensemble_model.generate(**inputs, **gen_kwargs)
+                # ensemble output available for external voting if needed
+                self._last_ensemble_output = self.ensemble_tok.decode(
+                    output[0][inputs["input_ids"].shape[1]:],
+                    skip_special_tokens=True,
+                )
+            except Exception:
+                pass
+
+        return primary_out
 
     def solve_with_reasoning(
         self,

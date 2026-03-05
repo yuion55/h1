@@ -1,6 +1,6 @@
 # cell_15_orchestrator_v5.py
 """
-CTRL-MATH v5 — Full Solve Orchestrator
+CTRL-MATH AIMO3 — Full Solve Orchestrator
 
 Wires ALL components:
   MCTS, LLM, PRM, MathRAG, TemplateStore, AnswerExtractor,
@@ -50,7 +50,7 @@ class SolveOrchestrator:
     within a time budget.
     """
 
-    _SC_K        = 3    # default self-consistency rollouts
+    _SC_K        = 5    # default self-consistency rollouts
     _LEAN_RETRIES = 3   # max Lean correction retries
     _DECOMP_AT   = 10   # attempt number to trigger decomposition
 
@@ -62,7 +62,7 @@ class SolveOrchestrator:
         z3_checker=None,
         total_seconds:  float = 9 * 3600.0,
         n_problems:     int   = 50,
-        mcts_sims:      int   = 64,
+        mcts_sims:      int   = 128,
         persist_path:   str   = "/tmp/mathrag_templates.json",
     ):
         self.llm   = llm
