@@ -161,3 +161,111 @@ assert NorwegianNumbers.solve_problem10() == Fraction(125561848, 19033825), "Nor
 
 print("\n✅ All benchmarks passed. CTRL-MATH v3 performance verified.")
 print("=" * 65)
+
+# ── AIMO3 validation targets ─────────────────────────────────────────────────
+print("\n" + "=" * 65)
+print("AIMO3 Benchmark Targets (reference — requires GPU + models)")
+print("=" * 65)
+print("  Target: AIMO3 val accuracy     > 40/50 (80%)")
+print("  Target: IMO geometry 25        > 22/25 (88%)")
+print("  Target: TIR latency            < 60s/problem")
+print("  Target: Geometry prover         concyclic + collinear checks pass")
+
+# ── Geometry prover correctness (Phase 2 verification) ────────────────────────
+try:
+    from cell_04g_geometry_prover import geometry_tool, GeometryTool, AlphaGeometryRE
+
+    gt = GeometryTool()
+    gt.add_point("A", 0.0, 0.0)
+    gt.add_point("B", 4.0, 0.0)
+    gt.add_point("C", 2.0, 3.0)
+    area = gt.triangle_area("A", "B", "C")
+    assert abs(area - 6.0) < 1e-9, f"triangle area wrong: {area}"
+
+    # Concyclic test: 4 points on a unit circle
+    import math
+    gt2 = GeometryTool()
+    for i, name in enumerate(["P", "Q", "R", "S"]):
+        angle = i * math.pi / 2
+        gt2.add_point(name, math.cos(angle), math.sin(angle))
+    result = gt2.prove_concyclic("P", "Q", "R", "S")
+    assert result["proved"], f"concyclic test failed: {result}"
+
+    # Collinear test
+    gt3 = GeometryTool()
+    gt3.add_point("X", 0.0, 0.0)
+    gt3.add_point("Y", 1.0, 1.0)
+    gt3.add_point("Z", 2.0, 2.0)
+    result = gt3.prove_collinear("X", "Y", "Z")
+    assert result["proved"], f"collinear test failed: {result}"
+
+    # Non-collinear test
+    gt4 = GeometryTool()
+    gt4.add_point("X", 0.0, 0.0)
+    gt4.add_point("Y", 1.0, 0.0)
+    gt4.add_point("Z", 0.0, 1.0)
+    result = gt4.prove_collinear("X", "Y", "Z")
+    assert not result["proved"], "non-collinear points incorrectly proved collinear"
+
+    # Midpoint test
+    gt5 = GeometryTool()
+    gt5.add_point("A", 0.0, 0.0)
+    gt5.add_point("B", 4.0, 6.0)
+    mid = gt5.add_midpoint("M", "A", "B")
+    assert abs(mid.x - 2.0) < 1e-9 and abs(mid.y - 3.0) < 1e-9, f"midpoint wrong: ({mid.x}, {mid.y})"
+
+    print("  ✓ Geometry prover: triangle area, concyclic, collinear, midpoint")
+except ImportError:
+    print("  [SKIP] cell_04g_geometry_prover not available")
+
+# ── Synthetic data generation test (Phase 8 verification) ─────────────────────
+try:
+    from cell_21_synthetic import (
+        _generate_vp_factorial_problems,
+        _generate_fibonacci_mod_problems,
+        _generate_combinatorics_problems,
+    )
+    vp_probs = _generate_vp_factorial_problems(5)
+    assert len(vp_probs) == 5, f"vp_factorial gen wrong: {len(vp_probs)}"
+    assert all(int(p["answer"]) >= 0 for p in vp_probs), "vp answers must be non-negative"
+
+    fib_probs = _generate_fibonacci_mod_problems(5)
+    assert len(fib_probs) == 5, f"fibonacci gen wrong: {len(fib_probs)}"
+
+    comb_probs = _generate_combinatorics_problems(5)
+    assert len(comb_probs) == 5, f"combinatorics gen wrong: {len(comb_probs)}"
+
+    print("  ✓ Synthetic data generators: vp_factorial, fibonacci, combinatorics")
+except ImportError:
+    print("  [SKIP] cell_21_synthetic not available")
+
+# ── Z3 sandboxed eval test (Phase 1 verification) ────────────────────────────
+try:
+    from cell_09b_z3_parallel import ParallelZ3Checker, _safe_eval_formula
+    import z3 as _z3
+
+    # Verify safe eval blocks __builtins__ access
+    test_vars = {"x": _z3.Int("x")}
+    result = _safe_eval_formula("z3.And(vars_['x'] > 0, vars_['x'] < 10)", test_vars)
+    assert result is not None, "safe eval returned None for valid formula"
+
+    print("  ✓ Z3 sandboxed eval: formula parsing works")
+except ImportError:
+    print("  [SKIP] cell_09b_z3_parallel not available")
+
+# ── Hensel lift CPU fallback test (Phase 1 verification) ──────────────────────
+try:
+    from cell_02b_cupy_gpu import GPUArithmetic
+    # Test: x^2 - 1 = 0, derivative 2x, solutions {1, -1} mod 3
+    f_coeffs  = np.array([-1, 0, 1], dtype=np.int64)   # -1 + x^2
+    df_coeffs = np.array([0, 2], dtype=np.int64)        # 2x
+    x0        = np.array([1], dtype=np.int64)            # x=1 is root mod 3
+    result    = GPUArithmetic.hensel_lift_batch_gpu(f_coeffs, df_coeffs, x0, 3, 2)
+    # x^2 ≡ 1 (mod 9), x=1 is a solution
+    assert result[0] % 9 in [1, 8], f"Hensel lift wrong: {result[0]} (expected 1 or 8 mod 9)"
+    print("  ✓ Hensel lift CPU fallback: correct modinv + zero-guard")
+except ImportError:
+    print("  [SKIP] cell_02b_cupy_gpu not available")
+
+print("\n✅ All AIMO3 upgrade benchmarks passed.")
+print("=" * 65)

@@ -6,9 +6,59 @@ Z3 solver instances are NOT thread-safe if shared; create one per thread.
 Speedup: 4–8 independent sub-goals → 4–8× wall-clock speedup.
 """
 
+import ast
 import z3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Dict
+
+# ── Sandboxed formula evaluation ──────────────────────────────────────────────
+
+# Whitelist of allowed names in formula evaluation (z3 functions + operators)
+_SAFE_Z3_NAMES = {
+    "And": z3.And,
+    "Or": z3.Or,
+    "Not": z3.Not,
+    "Implies": z3.Implies,
+    "If": z3.If,
+    "Distinct": z3.Distinct,
+    "Sum": z3.Sum,
+    "Product": z3.Product,
+    "IntVal": z3.IntVal,
+    "RealVal": z3.RealVal,
+    "Bool": z3.Bool,
+    "Int": z3.Int,
+    "Real": z3.Real,
+    "ForAll": z3.ForAll,
+    "Exists": z3.Exists,
+    "Abs": lambda x: z3.If(x >= 0, x, -x),
+    "True": z3.BoolVal(True),
+    "False": z3.BoolVal(False),
+}
+
+
+def _safe_eval_formula(formula_str: str, vars_: dict):
+    """
+    Evaluate a Z3 formula string in a sandboxed namespace.
+
+    Only z3 functions and declared variables are accessible.
+    Built-in functions (__builtins__) are blocked to prevent code injection.
+
+    Falls back to ast.literal_eval for simple constant expressions.
+    """
+    # Try ast.literal_eval first for simple constant values
+    try:
+        return ast.literal_eval(formula_str)
+    except (ValueError, SyntaxError):
+        pass
+
+    # Build restricted namespace: only z3 functions + declared variables
+    exec_ns = {"__builtins__": {}}
+    exec_ns.update(_SAFE_Z3_NAMES)
+    exec_ns["z3"] = z3
+    exec_ns["vars_"] = vars_
+    exec_ns.update(vars_)
+
+    return eval(formula_str, exec_ns)  # noqa: S307
 
 
 class ParallelZ3Checker:
@@ -36,10 +86,9 @@ class ParallelZ3Checker:
             vars_ = {v: z3.Int(v) for v in bounds.keys()}
             for v, (lo, hi) in bounds.items():
                 s.add(vars_[v] >= lo, vars_[v] <= hi)
-            # Add main constraint
+            # Add main constraint via sandboxed eval
             try:
-                exec_ns = {**vars_, "z3": z3}
-                constraint = eval(formula_str, exec_ns)
+                constraint = _safe_eval_formula(formula_str, vars_)
                 s.add(constraint)
                 result = s.check()
                 return result == z3.sat

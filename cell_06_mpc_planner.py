@@ -146,3 +146,115 @@ class MPCPlanner:
         with ThreadPoolExecutor(max_workers=min(len(states), N_CORES)) as pool:
             results = list(pool.map(solve_one, states))
         return results
+
+
+# ── AIMO3 Unified Solver ──────────────────────────────────────────────────────
+
+
+def _ctrl_math_verify(answer: int, problem: str) -> bool:
+    """
+    Verify an answer using available verification tools.
+    Returns True if the answer passes basic sanity checks.
+    """
+    if not isinstance(answer, int):
+        try:
+            answer = int(answer)
+        except (TypeError, ValueError):
+            return False
+
+    # AIMO3: answers must be non-negative integers
+    if answer < 0:
+        return False
+
+    return True
+
+
+def _majority_vote(answers: list, early_stop: int = 4) -> int:
+    """
+    Return the most common answer via majority vote.
+    Early stop if early_stop occurrences of the same answer are seen.
+    """
+    if not answers:
+        return 0
+
+    from collections import Counter
+    counts = Counter()
+    for ans in answers:
+        counts[ans] += 1
+        if counts[ans] >= early_stop:
+            return ans
+
+    return counts.most_common(1)[0][0]
+
+
+async def solve_aimo3(problem: str, llm=None, geometry_tool=None,
+                      n_rollouts: int = 32, early_stop: int = 4) -> int:
+    """
+    Unified AIMO3 solver entry point.
+
+    Routes to geometry prover or TIR LLM solver based on problem keywords.
+    Uses majority voting with early consensus stopping.
+
+    Args:
+        problem: Problem text
+        llm: LLM executor instance (LLMExecutorV5 or LLMExecutor)
+        geometry_tool: GeometryTool instance
+        n_rollouts: Number of LLM rollouts to generate
+        early_stop: Stop early when this many rollouts agree
+
+    Returns:
+        Integer answer (0 on failure)
+    """
+    text_lower = problem.lower()
+
+    # ── Route geometry problems ───────────────────────────────────────────────
+    if geometry_tool is not None and any(kw in text_lower for kw in
+            ["triangle", "circle", "polygon", "circumscribe", "inscribe",
+             "concyclic", "collinear", "perpendicular", "parallel",
+             "angle", "tangent", "chord"]):
+        try:
+            geo_result = geometry_tool.solve(problem)
+            if geo_result.solved and geo_result.answer is not None:
+                return int(geo_result.answer)
+        except Exception:
+            pass
+
+    # ── TIR solver with majority voting ───────────────────────────────────────
+    if llm is None:
+        return 0
+
+    verified_answers = []
+    for i in range(n_rollouts):
+        try:
+            # Generate solution
+            if hasattr(llm, 'solve_with_reasoning'):
+                result = llm.solve_with_reasoning(problem)
+                ans = result.get("answer", 0)
+            elif hasattr(llm, 'propose_operations'):
+                ops = llm.propose_operations(problem, k=1)
+                if ops:
+                    import re
+                    raw = ops[0].get("raw", "")
+                    match = re.search(r'\d+', raw)
+                    ans = int(match.group()) if match else 0
+                else:
+                    ans = 0
+            else:
+                break
+
+            # Verify
+            if _ctrl_math_verify(ans, problem):
+                verified_answers.append(ans)
+
+            # Early stop on consensus
+            if len(verified_answers) >= early_stop:
+                from collections import Counter
+                counts = Counter(verified_answers)
+                top_ans, top_count = counts.most_common(1)[0]
+                if top_count >= early_stop:
+                    return top_ans
+
+        except Exception:
+            continue
+
+    return _majority_vote(verified_answers) if verified_answers else 0
