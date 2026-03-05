@@ -40,10 +40,10 @@ warnings.filterwarnings("ignore")
 
 # ── Hardware inventory ────────────────────────────────────────────────────────
 print("=" * 65)
-print("CTRL-MATH v3 — High Performance Hardware Inventory")
+print("CTRL-MATH AIMO3 — H100 High Performance Hardware Inventory")
 print("=" * 65)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-assert DEVICE == "cuda", "T4 GPU required."
+assert DEVICE == "cuda", "H100 GPU required."
 props   = torch.cuda.get_device_properties(0)
 VRAM_GB = props.total_memory / 1e9
 N_CORES = os.cpu_count()
@@ -70,3 +70,16 @@ for _p in PRIMES_ARRAY:
     if _p > 100_000: break
     PHI_TABLE[_p::_p] = PHI_TABLE[_p::_p] // _p * (_p - 1)
 print(f"  phi(n) table: n ≤ 100,000 precomputed")
+
+# ── AIMO3 Model Configuration ─────────────────────────────────────────────────
+MODEL_PRIMARY     = "Qwen/Qwen2.5-Math-14B-Instruct"   # Primary TIR solver
+MODEL_ENSEMBLE    = "deepseek-ai/DeepSeek-Math-7B-Instruct"  # Ensemble/backup
+MODEL_PRM         = "Qwen/Qwen2.5-Math-1.5B-Instruct"  # Process Reward Model
+LORA_ADAPTER_PATH = "/kaggle/working/ctrlmath_aimo3_lora.safetensors"
+
+# ── AIMO3 Dataset Configuration ───────────────────────────────────────────────
+DATASET_SFT_PRIMARY  = "nvidia/OpenMathReasoning"   # 540K TIR traces
+DATASET_GEOMETRY     = "THUDM/InternMath"            # 20K geometry-heavy
+DATASET_AIME_IMO     = "math-ai/imo-aime-problems"   # 5K classic problems
+DATASET_AIMO3_VAL    = "/kaggle/input/ai-mathematical-olympiad-progress-prize-3"  # 347 verified
+DATASET_SYNTHETIC    = "/kaggle/working/synthetic_aimo3"  # Generated synthetic data

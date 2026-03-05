@@ -2,6 +2,7 @@
 """
 CTRL-MATH v5 — Process Reward Model
 Combines symbolic scoring (Numba JIT) and LLM scoring in a single batch call.
+LLM scorer uses Qwen2.5-Math-1.5B-Instruct.
 
 Combined score: 0.6 * llm_score + 0.4 * symbolic_score
 """
@@ -147,6 +148,7 @@ class ProcessRewardModel:
     LLM scoring uses a single model.forward() call for all K steps (batched).
     """
 
+    PRM_MODEL_ID    = "Qwen/Qwen2.5-Math-1.5B-Instruct"
     LLM_WEIGHT      = 0.6
     SYMBOLIC_WEIGHT = 0.4
 
