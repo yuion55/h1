@@ -428,6 +428,14 @@ def run_grpo_training(
         return False
 
 
+def _normalize_answer(val) -> int | None:
+    """Normalize a predicted or expected answer value to int for comparison."""
+    try:
+        return int(float(str(val).strip()))
+    except (ValueError, TypeError):
+        return None
+
+
 def evaluate_on_aimo3_val(
     orchestrator,
     val_problems: List[Dict],
@@ -451,7 +459,10 @@ def evaluate_on_aimo3_val(
 
         try:
             predicted = orchestrator.solve_problem(pid, problem)
-            is_correct = str(predicted).strip() == str(answer).strip()
+            pred_int = _normalize_answer(predicted)
+            ans_int  = _normalize_answer(answer)
+            is_correct = (pred_int is not None and ans_int is not None
+                          and pred_int == ans_int)
             if is_correct:
                 correct += 1
             results.append({

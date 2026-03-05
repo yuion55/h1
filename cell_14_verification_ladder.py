@@ -35,9 +35,9 @@ class VerificationLadder:
     The ladder stops at the first definitive pass.
     """
 
-    # Competition answer bounds (typical AIMO constraints)
+    # Competition answer bounds — configurable via constructor
     _ANSWER_LO = 0
-    _ANSWER_HI = 10**9 + 7
+    _ANSWER_HI = 999  # AIMO3 Progress Prize default
 
     def __init__(
         self,
@@ -45,11 +45,15 @@ class VerificationLadder:
         z3_checker=None,
         kalman_state=None,
         lean_timeout: int = 30,
+        answer_lo: int = 0,
+        answer_hi: int = 999,
     ):
         self.lean       = lean_repl
         self.z3         = z3_checker
         self.kalman     = kalman_state
         self.lean_timeout = lean_timeout
+        self._ANSWER_LO = answer_lo
+        self._ANSWER_HI = answer_hi
 
     # ── Public API ─────────────────────────────────────────────────────────────
 
@@ -104,7 +108,7 @@ class VerificationLadder:
 
     def _level0(self, answer: int) -> VerificationResult:
         """
-        Range check: 0 ≤ answer ≤ 10^9 + 7.
+        Range check: answer_lo ≤ answer ≤ answer_hi.
         < 1μs.
         """
         t0 = time.perf_counter()
