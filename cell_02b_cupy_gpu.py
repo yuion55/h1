@@ -199,16 +199,20 @@ extern "C" __global__ void sigma_k_kernel(
             for x0 in x0_arr:
                 x   = int(x0)
                 mod = p
-                while mod < p ** target_power:
-                    fx  = int(np.polyval(f_coeffs[::-1],  x)) % (mod * mod)
+                p_target = p ** target_power
+                while mod < p_target:
+                    mod2 = mod * mod
+                    fx  = int(np.polyval(f_coeffs[::-1],  x)) % mod2
                     dfx = int(np.polyval(df_coeffs[::-1], x)) % mod
+                    if dfx == 0:
+                        break  # Cannot lift if derivative is zero
                     try:
                         dfx_inv = pow(int(dfx), -1, mod)
-                    except Exception:
+                    except (ValueError, ZeroDivisionError):
                         dfx_inv = 0
-                    x   = (x - fx * dfx_inv) % (mod * mod)
-                    mod = mod * mod
-                results.append(x % p**target_power)
+                    x   = (x - fx * dfx_inv) % mod2
+                    mod = mod2
+                results.append(x % p_target)
             return np.array(results, dtype=np.int64)
 
         # GPU: each thread lifts one starting solution
@@ -232,21 +236,30 @@ extern "C" __global__ void hensel_lift(
         long long mod2 = mod * mod;
         // Evaluate f(x) mod mod^2 using Horner
         long long fx = 0;
-        for (int j = degree; j >= 0; j--)
-            fx = ((__int128)fx * x + f_coeffs[j]) % mod2;
+        for (int j = degree; j >= 0; j--) {
+            __int128 term = (__int128)fx * x + f_coeffs[j];
+            fx = (long long)(((term % mod2) + mod2) % mod2);
+        }
         // Evaluate f'(x) mod mod
         long long dfx = 0;
-        for (int j = degree; j >= 1; j--)
-            dfx = ((__int128)dfx * x + df_coeffs[j]) % mod;
-        // Modular inverse of dfx mod mod via extended Euclidean
-        long long a0 = dfx % mod, b0 = mod, s0 = 1, s1 = 0;
+        for (int j = degree; j >= 1; j--) {
+            __int128 term = (__int128)dfx * x + df_coeffs[j];
+            dfx = (long long)(((term % mod) + mod) % mod);
+        }
+        // Guard: if f'(x) ≡ 0 (mod mod), lifting cannot proceed
+        if (dfx == 0) break;
+        // Modular inverse of dfx mod mod via extended Euclidean (128-bit safe)
+        __int128 a0 = dfx % mod, b0 = mod, s0 = 1, s1 = 0;
+        if (a0 < 0) a0 += mod;
         while (b0 != 0) {
-            long long q = a0 / b0;
-            long long tmp = b0; b0 = a0 - q * b0; a0 = tmp;
+            __int128 q = a0 / b0;
+            __int128 tmp = b0; b0 = a0 - q * b0; a0 = tmp;
             tmp = s1; s1 = s0 - q * s1; s0 = tmp;
         }
-        long long dfx_inv = (s0 % mod + mod) % mod;
-        x = (x - (__int128)fx * dfx_inv % mod2 + mod2) % mod2;
+        long long dfx_inv = (long long)((s0 % mod + mod) % mod);
+        // Newton step: x = x - f(x) * f'(x)^{-1} (mod mod^2)
+        long long correction = (long long)((__int128)fx * dfx_inv % mod2);
+        x = ((x - correction) % mod2 + mod2) % mod2;
         mod = mod2;
     }
     result[i] = x % p_pow;
