@@ -8,7 +8,7 @@ Wires ALL components:
 
 4-phase solve loop:
   1. Shortcuts (template match, direct extract)
-  2. MCTS solve (K=3 independent rollouts → self-consistency)
+  2. MCTS solve (K=5 independent rollouts → self-consistency)
   3. Verify + Lean correction (up to 3 retries)
   4. Template save on success
 

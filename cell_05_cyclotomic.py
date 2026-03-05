@@ -2,6 +2,11 @@
 """
 Cyclotomic polynomial tools for competition math.
 Uses precomputed PHI_LEQ_8 table (no SymPy calls in hot path).
+
+NOTE: This module is NOT imported by the main orchestrator pipeline.
+It provides standalone utilities for cyclotomic polynomial problems.
+The count_shifty_polynomials() method directly solves reference problem dd7f5e (answer: 160).
+To integrate: import CyclotomicTools in the orchestrator's domain-specific solver routing.
 """
 
 import numpy as np

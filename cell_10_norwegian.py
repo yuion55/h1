@@ -3,6 +3,10 @@
 NorwegianNumbers: competition math solver for Norwegian-style number theory problems.
 Implements specific problem archetypes involving multiplicative functions,
 Euler products, and exact rational arithmetic.
+
+NOTE: This module provides solvers for specific problem archetypes (e.g., reference problem 86e8e5).
+It is NOT a general-purpose solver. The orchestrator may route matching problems here via keyword detection.
+For hidden test problems, the LLM-based solver in cell_15_orchestrator_v5.py is the primary solver.
 """
 
 from fractions import Fraction

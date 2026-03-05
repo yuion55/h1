@@ -63,17 +63,30 @@ _FEAT_STEP_LENGTH  = 4
 _N_FEATURES        = 5
 
 
+# Symbolic feature weights:
+#   has_equals:      +0.3  (concrete progress)
+#   has_theorem:     +0.3  (uses known theorem)
+#   contradiction:   -0.8  (detected error, heavy penalty)
+#   has_number:      +0.2  (numeric result)
+#   length_norm:     +0.1  (reasonable length, 0.02 < len < 0.9)
+# Max symbolic score: 0.9 (clamped to [0, 1])
+# Combined PRM score = 0.6 * llm_score + 0.4 * symbolic_score
+
+
 @njit(cache=True)
 def symbolic_score_jit(features: np.ndarray) -> float:
     """
     Fast symbolic score from pre-extracted features.
     < 1μs per step.
 
-    features[0] = has_equals (0/1)
-    features[1] = has_known_theorem (0/1)
-    features[2] = has_contradiction (0/1)  → penalize
-    features[3] = has_number (0/1)
-    features[4] = step_length_norm ∈ [0,1]
+    features[0] = has_equals (0/1)        → +0.3 (concrete progress)
+    features[1] = has_known_theorem (0/1) → +0.3 (uses known theorem)
+    features[2] = has_contradiction (0/1) → -0.8 (detected error, heavy penalty)
+    features[3] = has_number (0/1)        → +0.2 (numeric result)
+    features[4] = step_length_norm ∈ [0,1] → +0.1 if 0.02 < value < 0.9
+
+    Max symbolic score: 0.9 (all positive features, no contradiction), clamped to [0, 1].
+    Combined PRM score = 0.6 * llm_score + 0.4 * symbolic_score.
     """
     score = 0.0
     # Reward: equals sign means concrete progress
