@@ -11,6 +11,14 @@ Benchmark assertions MUST pass:
 from numba import njit, prange, int64, boolean
 import numpy as np
 
+# Optional CuPy for GPU FFT acceleration (H100/A100)
+try:
+    import cupy as _cp
+    _CUPY_AVAILABLE = True
+except (ImportError, Exception):
+    _cp = None
+    _CUPY_AVAILABLE = False
+
 # ────────────────────────────────────────────────────────────────────────────
 # 3.1.1  p-adic valuation  —  v_p(n)
 # ────────────────────────────────────────────────────────────────────────────
@@ -131,7 +139,7 @@ def vp_batch_factorial(n: int, primes: np.ndarray) -> np.ndarray:
 # 3.1.6  Dirichlet convolution — race-condition-free parallel
 # ────────────────────────────────────────────────────────────────────────────
 @njit(parallel=True, cache=True)
-def dirichlet_conv_safe(f: np.ndarray, g: np.ndarray) -> np.ndarray:
+def dirichlet_conv_safe(f: np.ndarray, g: np.ndarray, mod: int = 0) -> np.ndarray:
     """
     Race-condition-free parallel Dirichlet convolution.
     Strategy: compute h[n] = sum_{d|n} f[d]*g[n/d] by iterating over n
@@ -139,6 +147,10 @@ def dirichlet_conv_safe(f: np.ndarray, g: np.ndarray) -> np.ndarray:
 
     For n ≤ N: iterate over d | n using the factored form.
     Simpler: iterate over n in prange, find all divisors of n, sum.
+
+    mod=0 means no modular reduction (exact arithmetic).
+    When mod > 0, each accumulation is reduced modulo mod to prevent
+    int64 overflow from large coefficient products.
 
     Benchmarks (N = 10^5): ~5 ms vs 400 ms Python → 80× speedup.
     For N = 10^6 use the scatter version with thread-local buffers.
@@ -150,9 +162,14 @@ def dirichlet_conv_safe(f: np.ndarray, g: np.ndarray) -> np.ndarray:
         d = 1
         while d * d <= n:
             if n % d == 0:
-                s += f[d] * g[n // d]
-                if d != n // d:
-                    s += f[n // d] * g[d]
+                if mod:
+                    s = (s + f[d] * g[n // d] % mod) % mod
+                    if d != n // d:
+                        s = (s + f[n // d] * g[d] % mod) % mod
+                else:
+                    s += f[d] * g[n // d]
+                    if d != n // d:
+                        s += f[n // d] * g[d]
             d += 1
         h[n] = s
     return h
@@ -193,7 +210,7 @@ def powmod_batch(bases: np.ndarray, exps: np.ndarray, mod: int) -> np.ndarray:
 # 3.1.8  Sieve-based sigma_k — vectorized NumPy  (no JIT needed)
 # ────────────────────────────────────────────────────────────────────────────
 @njit(cache=True)
-def sigma_k_sieve(N: int, k: int) -> np.ndarray:
+def sigma_k_sieve(N: int, k: int, mod: int = 0) -> np.ndarray:
     """
     Compute sigma_k(n) for all n = 1..N simultaneously using a linear sieve.
 
@@ -203,6 +220,10 @@ def sigma_k_sieve(N: int, k: int) -> np.ndarray:
             result[d::d] += d^k
 
     Fully JIT-compiled with Numba — no Python loop overhead.
+
+    mod=0 means no modular reduction (exact arithmetic).
+    When mod > 0, dk and accumulations are reduced modulo mod to prevent
+    int64 overflow for large k (e.g. k ≥ 3 with N = 10^6).
 
     Benchmarks (N = 10^6, k=1):
         Numba JIT         : ~80 ms
@@ -215,8 +236,13 @@ def sigma_k_sieve(N: int, k: int) -> np.ndarray:
         dk = np.int64(1)
         for _ in range(k):
             dk *= d
+            if mod:
+                dk %= mod
         for m in range(d, N + 1, d):
-            result[m] += dk
+            if mod:
+                result[m] = (result[m] + dk) % mod
+            else:
+                result[m] += dk
     return result
 
 
@@ -225,14 +251,15 @@ def sum_sigma_k_upto(N: int, k: int) -> int:
     sum_{j=1}^{N} sigma_k(j) in O(N) via:
         sum_{d=1}^{N} d^k * floor(N/d)
     Vectorized: no Python loop.
+    Uses int64 arithmetic throughout to avoid float64 precision loss.
 
     >>> sum_sigma_k_upto(4, 1)
     15
     """
-    d  = np.arange(1, N + 1, dtype=np.float64)
-    dk = np.power(d, k)
-    qk = (N / d).astype(np.int64)  # floor(N/d)
-    return int(np.dot(dk, qk))
+    d  = np.arange(1, N + 1, dtype=np.int64)
+    dk = np.power(d, k).astype(np.int64)
+    qk = (N // d).astype(np.int64)
+    return int(np.sum(dk * qk))
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -347,15 +374,25 @@ def roots_of_unity_filter_batch(a_coeffs: np.ndarray, n: int,
 
     where omega = e^{2*pi*i/n}, A(z) = sum a_k z^k.
 
-    Vectorized over all residues at once using np.fft.
+    Vectorized over all residues at once using FFT.
+    Uses CuPy GPU FFT when available (H100 acceleration), falls back to NumPy.
 
     Returns array of length len(residues) with S[r] for each r.
 
     Benchmarks: 1000 residues × n=1000 → 2 ms (vs 2000 ms Python) → 1000×
     """
     chunk = a_coeffs[:n] if len(a_coeffs) >= n else np.pad(a_coeffs, (0, n - len(a_coeffs)))
-    A_at_roots = np.fft.fft(chunk)          # shape (n,)
-    all_S      = np.fft.ifft(A_at_roots).real   # shape (n,): S[r] for r=0..n-1
+    if _CUPY_AVAILABLE:
+        try:
+            d_chunk = _cp.asarray(chunk)
+            A_at_roots = _cp.fft.fft(d_chunk)
+            all_S = _cp.asnumpy(_cp.fft.ifft(A_at_roots).real)
+        except Exception:
+            A_at_roots = np.fft.fft(chunk)
+            all_S      = np.fft.ifft(A_at_roots).real
+    else:
+        A_at_roots = np.fft.fft(chunk)          # shape (n,)
+        all_S      = np.fft.ifft(A_at_roots).real   # shape (n,): S[r] for r=0..n-1
     return all_S[residues]
 
 
@@ -378,21 +415,30 @@ def fib_jit(n: int, mod: int = 0) -> int:
 
     while n > 0:
         if n & 1:
-            # multiply result by matrix
-            na = ra * a + rb * c
-            nb = ra * b + rb * d
-            nc = rc * a + rd * c
-            nd = rc * b + rd * d
+            # multiply result by matrix — reduce each product before adding
+            # to prevent int64 overflow when mod is large (e.g. 10^9+7)
             if mod:
-                na %= mod; nb %= mod; nc %= mod; nd %= mod
+                na = (ra * a % mod + rb * c % mod) % mod
+                nb = (ra * b % mod + rb * d % mod) % mod
+                nc = (rc * a % mod + rd * c % mod) % mod
+                nd = (rc * b % mod + rd * d % mod) % mod
+            else:
+                na = ra * a + rb * c
+                nb = ra * b + rb * d
+                nc = rc * a + rd * c
+                nd = rc * b + rd * d
             ra, rb, rc, rd = na, nb, nc, nd
-        # square the matrix
-        na = a * a + b * c
-        nb = a * b + b * d
-        nc = c * a + d * c
-        nd = c * b + d * d
+        # square the matrix — reduce each product before adding
         if mod:
-            na %= mod; nb %= mod; nc %= mod; nd %= mod
+            na = (a * a % mod + b * c % mod) % mod
+            nb = (a * b % mod + b * d % mod) % mod
+            nc = (c * a % mod + d * c % mod) % mod
+            nd = (c * b % mod + d * d % mod) % mod
+        else:
+            na = a * a + b * c
+            nb = a * b + b * d
+            nc = c * a + d * c
+            nd = c * b + d * d
         a, b, c, d = na, nb, nc, nd
         n >>= 1
     return rb  # F_n = M^n [0][1]
@@ -444,11 +490,13 @@ def _warmup_jit():
     modinv_batch(np.array([2, 3, 5], np.int64), np.int64(998244353))
     fib_jit(np.int64(20), np.int64(10**9 + 7))
     sigma_k_sieve(np.int64(100), np.int64(1))
+    sigma_k_sieve(np.int64(100), np.int64(3), np.int64(998244353))
     _powmod(np.int64(3), np.int64(10), np.int64(998244353))
     ntt(np.array([1, 2, 3, 4], dtype=np.int64))
     f = np.zeros(100, dtype=np.int64); f[1] = 1
     g = np.ones(100,  dtype=np.int64); g[0] = 0
     dirichlet_conv_safe(f, g)
+    dirichlet_conv_safe(f, g, np.int64(998244353))
     poly_mul_ntt(np.array([1, 2], dtype=np.int64), np.array([1, 2], dtype=np.int64))
     print(" ✅ done.")
 

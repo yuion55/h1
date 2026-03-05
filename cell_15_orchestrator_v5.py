@@ -231,9 +231,20 @@ class SolveOrchestrator:
         """
         best_text = texts[-1] if texts else ""
 
+        # Try to extract a sympy expression from the best rollout
+        sympy_expr = ""
+        if best_text:
+            import re as _re
+            expr_match = _re.search(
+                r'(?:result|answer)\s*=\s*(.+?)(?:\n|$)', best_text
+            )
+            if expr_match:
+                sympy_expr = expr_match.group(1).strip()
+
         # Level 0 + 1 always run
         try:
-            vr = self.ladder.verify(answer, problem=problem_text)
+            vr = self.ladder.verify(answer, problem=problem_text,
+                                    sympy_expr=sympy_expr)
             if vr.passed and vr.confidence >= 0.8:
                 return answer
         except Exception:
