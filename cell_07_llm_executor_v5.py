@@ -245,6 +245,13 @@ class LLMExecutorV5:
         Falls back to greedy if no draft model or no transformers.
         """
         if not HAS_TRANSFORMERS or self.model is None:
+            import warnings
+            warnings.warn(
+                "LLMExecutorV5: model not loaded — returning empty response. "
+                "Ensure the model is available at the configured path.",
+                RuntimeWarning,
+                stacklevel=2,
+            )
             return ""
 
         inputs = self.tokenizer(
