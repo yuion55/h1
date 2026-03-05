@@ -186,6 +186,12 @@ class MCTSEngine:
         """
         import time
 
+        # Without an LLM, MCTS cannot expand nodes — return early so that
+        # the caller's fallback logic (e.g. SymPy) is tried instead of
+        # extracting a spurious integer from the problem text itself.
+        if self.llm is None:
+            return 0, ""
+
         self.store.reset()
         root = self.store.alloc(-1, 0, problem)
 

@@ -196,7 +196,8 @@ class SolveOrchestrator:
         """
         Try fast shortcuts before MCTS:
           1. Template match
-          2. Direct answer extraction from problem statement
+          2. SymPy direct solve (no LLM required)
+          3. Direct answer extraction from problem statement
         """
         # Template match
         try:
@@ -205,6 +206,15 @@ class SolveOrchestrator:
                 ans = similar[0].get("answer", 0)
                 if ans:
                     return int(ans)
+        except Exception:
+            pass
+
+        # SymPy direct solve — evaluates simple LaTeX expressions and
+        # equations without requiring LLM.  Returns None for complex problems.
+        try:
+            sympy_ans = self._solve_with_sympy(problem_text)
+            if sympy_ans is not None:
+                return sympy_ans
         except Exception:
             pass
 
@@ -328,3 +338,85 @@ class SolveOrchestrator:
                 )
         except Exception:
             pass
+
+    # ── SymPy direct-solve helpers ────────────────────────────────────────────
+
+    def _solve_with_sympy(self, problem_text: str) -> Optional[int]:
+        """
+        Attempt to solve the problem by evaluating LaTeX math expressions
+        directly with SymPy — no LLM required.
+
+        Works for problems whose answer IS the evaluation of an embedded
+        expression or equation, e.g.:
+          "What is $1-1$?"        → 0
+          "What is $0\\times10$?"  → 0
+          "Solve $4+x=4$ for $x$." → 0
+
+        Returns an integer answer mod 100_000, or None when SymPy cannot
+        determine a definitive numeric answer.
+        """
+        import re
+        math_exprs = re.findall(r'\$([^$]+)\$', problem_text)
+        for expr_str in math_exprs:
+            result = self._eval_latex_expr(expr_str.strip())
+            if result is not None:
+                return result
+        return None
+
+    def _eval_latex_expr(self, expr_str: str) -> Optional[int]:
+        """
+        Evaluate a single LaTeX expression string with SymPy.
+
+        Handles:
+          - Basic arithmetic with \\times, \\cdot, \\div, \\frac{}{}
+          - Simple single-variable equations (a = b, solve for the variable)
+
+        Returns an integer in [0, 99999] (mod 100_000), or None when the
+        expression cannot be reduced to a concrete integer.
+        """
+        import re
+        try:
+            import sympy
+        except ImportError:
+            return None
+
+        s = expr_str
+        # Inline fractions: \frac{a}{b} → ((a)/(b))
+        s = re.sub(r'\\frac\{([^}]+)\}\{([^}]+)\}', r'((\1)/(\2))', s)
+        # Common LaTeX operators → Python/SymPy notation
+        s = s.replace(r'\times', '*')
+        s = s.replace(r'\cdot', '*')
+        s = s.replace(r'\div', '/')
+        s = s.replace(r'\left', '').replace(r'\right', '')
+        s = s.replace(r'\,', ' ').replace(r'\!', '')
+
+        if '=' in s:
+            parts = s.split('=', 1)
+            lhs_str, rhs_str = parts[0].strip(), parts[1].strip()
+            try:
+                lhs = sympy.sympify(lhs_str)
+                rhs = sympy.sympify(rhs_str)
+                eq  = sympy.Eq(lhs, rhs)
+                free = eq.free_symbols
+                if len(free) == 1:
+                    var = list(free)[0]
+                    solutions = sympy.solve(eq, var)
+                    if solutions:
+                        val = solutions[0]
+                        if val.is_number:
+                            fv = float(val.evalf())
+                            if abs(fv - round(fv)) < 1e-9:
+                                return int(round(fv)) % 100_000
+            except Exception:
+                pass
+        else:
+            try:
+                expr = sympy.sympify(s)
+                val  = sympy.simplify(expr)
+                if val.is_number:
+                    fv = float(val.evalf())
+                    if abs(fv - round(fv)) < 1e-9:
+                        return int(round(fv)) % 100_000
+            except Exception:
+                pass
+        return None
