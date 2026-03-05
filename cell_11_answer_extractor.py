@@ -63,7 +63,7 @@ class AnswerExtractor:
       8. Last integer in text
     """
 
-    ANSWER_MAX = 999  # AIMO3 Progress Prize maximum answer value
+    ANSWER_MAX = 99999  # AIMO3 Progress Prize maximum answer value
 
     def extract(
         self, text, problem_modulus: int = 0

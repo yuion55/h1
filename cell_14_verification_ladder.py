@@ -37,7 +37,7 @@ class VerificationLadder:
 
     # Competition answer bounds — configurable via constructor
     _ANSWER_LO = 0
-    _ANSWER_HI = 999  # AIMO3 Progress Prize default
+    _ANSWER_HI = 99999  # AIMO3 Progress Prize default
 
     def __init__(
         self,
@@ -46,7 +46,7 @@ class VerificationLadder:
         kalman_state=None,
         lean_timeout: int = 30,
         answer_lo: int = 0,
-        answer_hi: int = 999,
+        answer_hi: int = 99999,
     ):
         self.lean       = lean_repl
         self.z3         = z3_checker

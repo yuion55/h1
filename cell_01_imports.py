@@ -43,11 +43,15 @@ print("=" * 65)
 print("CTRL-MATH AIMO3 — H100 High Performance Hardware Inventory")
 print("=" * 65)
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-assert DEVICE == "cuda", "H100 GPU required."
-props   = torch.cuda.get_device_properties(0)
-VRAM_GB = props.total_memory / 1e9
+if DEVICE != "cuda":
+    warnings.warn("H100 GPU not detected — running in CPU-only mode (degraded performance).", RuntimeWarning)
+    VRAM_GB = 0.0
+    props   = None
+else:
+    props   = torch.cuda.get_device_properties(0)
+    VRAM_GB = props.total_memory / 1e9
 N_CORES = os.cpu_count()
-print(f"  GPU    : {props.name}  ({VRAM_GB:.1f} GB VRAM)")
+print(f"  GPU    : {props.name if props else 'CPU'}  ({VRAM_GB:.1f} GB VRAM)")
 print(f"  CPU    : {N_CORES} cores")
 print(f"  Numba  : {nb.__version__}  threads={os.environ.get('NUMBA_NUM_THREADS', str(N_CORES))}")
 print(f"  CuPy   : {'✅' if HAS_CUPY  else '❌'}")
