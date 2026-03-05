@@ -423,7 +423,8 @@ class GeometryTool:
         mutations = []
         for i in range(n):
             # Random triangle
-            coords = [(random.uniform(-10, 10), random.uniform(-10, 10)) for _ in range(3)]
+            coords = [(random.uniform(MUTATION_MIN_COORD, MUTATION_MAX_COORD),
+                       random.uniform(MUTATION_MIN_COORD, MUTATION_MAX_COORD)) for _ in range(3)]
             self.reset()
             self.add_point("A", coords[0][0], coords[0][1])
             self.add_point("B", coords[1][0], coords[1][1])
@@ -454,6 +455,12 @@ class GeometryTool:
 
         return mutations
 
+
+# ── Module-level constants ────────────────────────────────────────────────────
+
+# Coordinate bounds for synthetic geometry problem generation
+MUTATION_MIN_COORD = -10
+MUTATION_MAX_COORD = 10
 
 # ── Module-level singleton ────────────────────────────────────────────────────
 

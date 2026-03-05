@@ -236,12 +236,16 @@ extern "C" __global__ void hensel_lift(
         long long mod2 = mod * mod;
         // Evaluate f(x) mod mod^2 using Horner
         long long fx = 0;
-        for (int j = degree; j >= 0; j--)
-            fx = (long long)((__int128)fx * x % mod2 + f_coeffs[j] % mod2 + mod2) % mod2;
+        for (int j = degree; j >= 0; j--) {
+            __int128 term = (__int128)fx * x + f_coeffs[j];
+            fx = (long long)(((term % mod2) + mod2) % mod2);
+        }
         // Evaluate f'(x) mod mod
         long long dfx = 0;
-        for (int j = degree; j >= 1; j--)
-            dfx = (long long)((__int128)dfx * x % mod + df_coeffs[j] % mod + mod) % mod;
+        for (int j = degree; j >= 1; j--) {
+            __int128 term = (__int128)dfx * x + df_coeffs[j];
+            dfx = (long long)(((term % mod) + mod) % mod);
+        }
         // Guard: if f'(x) ≡ 0 (mod mod), lifting cannot proceed
         if (dfx == 0) break;
         // Modular inverse of dfx mod mod via extended Euclidean (128-bit safe)

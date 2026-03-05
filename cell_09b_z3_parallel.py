@@ -51,6 +51,15 @@ def _safe_eval_formula(formula_str: str, vars_: dict):
     except (ValueError, SyntaxError):
         pass
 
+    # Validate formula structure: reject obviously dangerous patterns
+    _BLOCKED_PATTERNS = ["__import__", "__builtins__", "exec(", "eval(",
+                         "compile(", "open(", "getattr(", "setattr(",
+                         "delattr(", "globals(", "locals(", "breakpoint("]
+    formula_lower = formula_str.lower()
+    for pat in _BLOCKED_PATTERNS:
+        if pat in formula_lower:
+            raise ValueError(f"Blocked pattern in formula: {pat}")
+
     # Build restricted namespace: only z3 functions + declared variables
     exec_ns = {"__builtins__": {}}
     exec_ns.update(_SAFE_Z3_NAMES)

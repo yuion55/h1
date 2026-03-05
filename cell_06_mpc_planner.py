@@ -169,10 +169,10 @@ def _ctrl_math_verify(answer: int, problem: str) -> bool:
     return True
 
 
-def _majority_vote(answers: list, early_stop: int = 4) -> int:
+def _majority_vote(answers: list, min_agreement: int = 4) -> int:
     """
     Return the most common answer via majority vote.
-    Early stop if early_stop occurrences of the same answer are seen.
+    Early stop if min_agreement occurrences of the same answer are seen.
     """
     if not answers:
         return 0
@@ -181,14 +181,14 @@ def _majority_vote(answers: list, early_stop: int = 4) -> int:
     counts = Counter()
     for ans in answers:
         counts[ans] += 1
-        if counts[ans] >= early_stop:
+        if counts[ans] >= min_agreement:
             return ans
 
     return counts.most_common(1)[0][0]
 
 
 async def solve_aimo3(problem: str, llm=None, geometry_tool=None,
-                      n_rollouts: int = 32, early_stop: int = 4) -> int:
+                      n_rollouts: int = 32, min_agreement: int = 4) -> int:
     """
     Unified AIMO3 solver entry point.
 
@@ -200,7 +200,7 @@ async def solve_aimo3(problem: str, llm=None, geometry_tool=None,
         llm: LLM executor instance (LLMExecutorV5 or LLMExecutor)
         geometry_tool: GeometryTool instance
         n_rollouts: Number of LLM rollouts to generate
-        early_stop: Stop early when this many rollouts agree
+        min_agreement: Stop early when this many rollouts agree
 
     Returns:
         Integer answer (0 on failure)
@@ -247,11 +247,11 @@ async def solve_aimo3(problem: str, llm=None, geometry_tool=None,
                 verified_answers.append(ans)
 
             # Early stop on consensus
-            if len(verified_answers) >= early_stop:
+            if len(verified_answers) >= min_agreement:
                 from collections import Counter
                 counts = Counter(verified_answers)
                 top_ans, top_count = counts.most_common(1)[0]
-                if top_count >= early_stop:
+                if top_count >= min_agreement:
                     return top_ans
 
         except Exception:
