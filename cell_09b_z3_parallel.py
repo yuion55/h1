@@ -7,33 +7,44 @@ Speedup: 4–8 independent sub-goals → 4–8× wall-clock speedup.
 """
 
 import ast
-import z3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Tuple, Dict
+
+try:
+    import z3 as _z3_module
+    _HAS_Z3 = True
+except ImportError:
+    _z3_module = None
+    _HAS_Z3 = False
 
 # ── Sandboxed formula evaluation ──────────────────────────────────────────────
 
 # Whitelist of allowed names in formula evaluation (z3 functions + operators)
-_SAFE_Z3_NAMES = {
-    "And": z3.And,
-    "Or": z3.Or,
-    "Not": z3.Not,
-    "Implies": z3.Implies,
-    "If": z3.If,
-    "Distinct": z3.Distinct,
-    "Sum": z3.Sum,
-    "Product": z3.Product,
-    "IntVal": z3.IntVal,
-    "RealVal": z3.RealVal,
-    "Bool": z3.Bool,
-    "Int": z3.Int,
-    "Real": z3.Real,
-    "ForAll": z3.ForAll,
-    "Exists": z3.Exists,
-    "Abs": lambda x: z3.If(x >= 0, x, -x),
-    "True": z3.BoolVal(True),
-    "False": z3.BoolVal(False),
-}
+if _HAS_Z3:
+    z3 = _z3_module
+    _SAFE_Z3_NAMES = {
+        "And": z3.And,
+        "Or": z3.Or,
+        "Not": z3.Not,
+        "Implies": z3.Implies,
+        "If": z3.If,
+        "Distinct": z3.Distinct,
+        "Sum": z3.Sum,
+        "Product": z3.Product,
+        "IntVal": z3.IntVal,
+        "RealVal": z3.RealVal,
+        "Bool": z3.Bool,
+        "Int": z3.Int,
+        "Real": z3.Real,
+        "ForAll": z3.ForAll,
+        "Exists": z3.Exists,
+        "Abs": lambda x: z3.If(x >= 0, x, -x),
+        "True": z3.BoolVal(True),
+        "False": z3.BoolVal(False),
+    }
+else:
+    z3 = None
+    _SAFE_Z3_NAMES = {}
 
 
 def _safe_eval_formula(formula_str: str, vars_: dict):
@@ -86,7 +97,11 @@ class ParallelZ3Checker:
         Returns list of booleans (True = SAT/provable, False = UNSAT/unprovable).
 
         Note: results are returned in the same order as sub_goals.
+        When z3 is not available, returns [False] * len(sub_goals).
         """
+        if not _HAS_Z3:
+            return [False] * len(sub_goals)
+
         def check_one(goal):
             formula_str, bounds = goal
             s = z3.Solver()
